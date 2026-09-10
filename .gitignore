@@ -24,3 +24,5 @@ __pycache__/
 # ruff cache
 .ruff_cache/
 venv/
+mlruns/
+mlartifacts/
