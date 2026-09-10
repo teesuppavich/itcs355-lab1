@@ -105,7 +105,7 @@ different seeds.
 
 ## Reproducibility trade-off
 
-**REPLACE with your answer, 100 words maximum.**
+If I ran out of time, I would drop hashed dependencies first, rather than digest pinning or seeds. Generating requirements.txt with --generate-hashes took the longest and was the most fragile part of this lab; my network dropped twice and interrupted it. Without hashes, pip install still installs the same versions from the == pins, so the build stays reproducible in most cases. What we lose is protection against a compromised PyPI package being swapped in unnoticed. Digest pinning and seed control are much cheaper to keep and guard against problems far more likely day to day.
 
 Three things pin your build: hashed dependencies, a digest-pinned base image, and controlled
 seeds. Under real time pressure you would keep some and drop others.
