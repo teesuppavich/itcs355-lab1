@@ -33,6 +33,8 @@ ENV PYTHONUNBUFFERED=1 \
 COPY --from=builder /install /usr/local
 WORKDIR /app
 COPY --chown=runner:runner src/ ./src/
+COPY --chown=runner:runner .dvc/ ./.dvc/
+COPY --chown=runner:runner data/raw.dvc ./data/raw.dvc
 COPY --chown=runner:runner cloudlayer/ ./cloudlayer/
 COPY --chown=runner:runner scripts/ ./scripts/
 RUN chown runner:runner /app

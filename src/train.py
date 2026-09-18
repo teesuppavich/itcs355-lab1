@@ -12,10 +12,12 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+from google.cloud import storage
 from pathlib import Path
 
 import mlflow
 import mlflow.sklearn
+import joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import average_precision_score, roc_auc_score
 
@@ -39,10 +41,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-depth", type=int, default=8)
     p.add_argument("--min-samples-leaf", type=int, default=5)
     p.add_argument("--seed", type=int, default=seeds.DEFAULT_SEED)
+    p.add_argument("--git-commit", default=None)
     p.add_argument("--experiment", default="itcs355-lab1")
     p.add_argument("--run-name", default=None)
     p.add_argument("--metrics-out", type=Path, default=None,
-                   help="Write final metrics as JSON. Used by `make verify`.")
+                   help="Write final metrics as JSON. Used by `make verify`.",)
+    p.add_argument("--blob-uri", default=None)
     return p.parse_args()
 
 
@@ -51,6 +55,22 @@ def main() -> None:
     cfg = config.load(strict=False)
     seed = seeds.set_all(args.seed)
 
+    # Download dataset from the DVC remote when running in the cloud.
+
+    blob_uri = args.blob_uri or cfg.blob_uri
+
+    if blob_uri.startswith("gs://"):
+        client = storage.Client(project=cfg.project_id)
+
+        bucket_name, prefix = blob_uri[5:].split("/", 1)
+        blob_path = f"{prefix}/dvc/files/md5/63/ec074c360e4e75d5ac2acb431feaca"
+
+        destination = cfg.raw_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        blob.download_to_filename(str(destination))
     df = data.load_raw(cfg.raw_path)
     fingerprint = data.data_fingerprint(cfg.raw_path)
     train_df, val_df, test_df = data.split(df, seed=seed)
@@ -58,7 +78,7 @@ def main() -> None:
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
     mlflow.set_experiment(args.experiment)
 
-    with mlflow.start_run(run_name=args.run_name):
+    with mlflow.start_run(run_name=args.run_name) as run:
         mlflow.log_params({
             "n_estimators": args.n_estimators,
             "max_depth": args.max_depth,
@@ -68,7 +88,7 @@ def main() -> None:
         })
         # Provenance. This is what makes the metric traceable.
         mlflow.set_tags({
-            "git_commit": git_commit(),
+            "git_commit": args.git_commit or git_commit(),
             "data_fingerprint": fingerprint,
             "split_strategy": "group_by_machine_id",
             "n_train_rows": len(train_df),
@@ -92,13 +112,42 @@ def main() -> None:
             metrics[f"{name}_pr_auc"] = float(average_precision_score(part[data.TARGET], proba))
         mlflow.log_metrics(metrics)
         mlflow.sklearn.log_model(model, name="model")
+        model_path = Path("/tmp/model.joblib")
+        joblib.dump(model, model_path)
 
         print(json.dumps({"seed": seed, "data_fingerprint": fingerprint, **metrics}, indent=2))
-        if args.metrics_out:
-            args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
-            args.metrics_out.write_text(json.dumps(
-                {"seed": seed, "data_fingerprint": fingerprint, **metrics}, indent=2))
+    if args.metrics_out:
+        args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
 
+        args.metrics_out.write_text(
+            json.dumps(
+                {
+                    "run_id": run.info.run_id,
+                    "seed": seed,
+                    "data_fingerprint": fingerprint,
+                    **metrics,
+                },
+                indent=2,
+        )
+    )
+
+        if blob_uri.startswith("gs://"):
+            bucket_name, prefix = blob_uri[5:].split("/", 1)
+
+            client = storage.Client(project=cfg.project_id)
+            bucket = client.bucket(bucket_name)
+
+            output_path = f"{prefix}/vertex-jobs/{args.run_name}/metrics.json"
+
+            bucket.blob(output_path).upload_from_filename(
+                str(args.metrics_out)
+            )
+
+            model_output_path = f"{prefix}/vertex-jobs/{args.run_name}/model.joblib"
+
+            bucket.blob(model_output_path).upload_from_filename(
+                str(model_path)
+            )
 
 if __name__ == "__main__":
     main()

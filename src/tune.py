@@ -76,7 +76,7 @@ def main() -> None:
 
     state = load_checkpoint(args.checkpoint)
     candidates = grid(SEARCH_SPACE)[: args.trials]
-    rate = costs.hourly_rate(cfg.provider, args.instance)
+    rate = costs.hourly_rate(cfg.provider, args.instance, spot=True)
 
     skipped: list[dict] = []
     for i, params in enumerate(candidates):

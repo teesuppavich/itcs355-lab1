@@ -1,0 +1,9 @@
+{
+  "run_id": "ea35baeefd01481d91cf8d93501bc0f1",
+  "seed": 20260101,
+  "data_fingerprint": "422cccb9136e8140",
+  "val_roc_auc": 0.8396969952282112,
+  "val_pr_auc": 0.40629248644155647,
+  "test_roc_auc": 0.84655741609384,
+  "test_pr_auc": 0.4674569671696359
+}
