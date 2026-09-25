@@ -8,7 +8,7 @@ PLATFORM ?= linux/amd64
 SEED ?= 20260101
 
 .PHONY: help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
-        tune compare reload-check serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate
+        tune compare reload-check serve serve-image loadtest deploy smoke drift inject-drift pipeline cost cost-report swap-check llm-eval llm-gate
 
 help:
 	@grep -E "^[a-zA-Z_-]+:.*?## .*$$" $(MAKEFILE_LIST) | awk -F":.*?## " "{printf \"  %-20s %s\\n\", \$$1, \$$2}"
@@ -109,3 +109,16 @@ cost: ## Build the cost report
 
 swap-check: ## Prove the portability seam against a second provider
 	python scripts/portability_swap_check.py --second-provider $(SECOND)
+
+# --- Lab 3 configuration ----------------------------------------------------
+MODEL_REF ?= 97210022034931712
+ENDPOINT ?= itcs355-lab3-endpoint
+INSTANCE ?= e2-standard-4
+
+deploy: ## Deploy the registered model to a Vertex AI endpoint
+	python -c "from src import config; from cloudlayer.factory import get_adapter; cfg=config.load(); print(get_adapter(cfg).deploy('$(MODEL_REF)', '$(ENDPOINT)', '$(INSTANCE)'))"
+
+smoke:
+	PYTHONPATH=. python scripts/smoke.py --endpoint "$(ENDPOINT)"
+
+cost-report: cost ## Alias required by Lab 3

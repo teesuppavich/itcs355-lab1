@@ -202,6 +202,132 @@ class GcpAdapter(CloudAdapter):
 
         return str(model.version_id)
     # deploy / invoke                   -> Lab 3 (Vertex Endpoint)
+
+    def deploy(self, model_ref: str, endpoint: str, instance: str) -> str:
+        """Create a Lab 3 serving model and deploy it to a Vertex endpoint."""
+        from google.cloud import aiplatform
+
+        aiplatform.init(
+            project=self.cfg.project_id,
+            location=self.cfg.region,
+            staging_bucket=self.cfg.blob_uri,
+        )
+
+        # Get the Lab 2 model so we can reuse its artifact URI.
+        source_model = aiplatform.Model(
+            model_name=str(model_ref),
+            project=self.cfg.project_id,
+            location=self.cfg.region,
+        )
+
+        artifact_uri = source_model.gca_resource.artifact_uri
+        print(f"Source artifact: {artifact_uri}")
+
+        # Lab 3 custom FastAPI serving image.
+        serving_image = (
+            f"{self.cfg.container_registry}/"
+            "itcs355-lab3-serving:v2"
+        )
+        print(f"Serving image: {serving_image}")
+
+        # Create a new Vertex Model for Lab 3.
+        model = aiplatform.Model.upload(
+            display_name=f"{endpoint}-model",
+            artifact_uri=artifact_uri,
+            serving_container_image_uri=serving_image,
+            serving_container_ports=[8080],
+            serving_container_predict_route="/predict",
+            serving_container_health_route="/health",
+            labels=self.cfg.tags(3),
+            project=self.cfg.project_id,
+            location=self.cfg.region,
+            staging_bucket=self.cfg.blob_uri,
+            sync=True,
+        )
+
+        print(f"Created Lab 3 model: {model.resource_name}")
+        print(f"Model ID: {model.name}")
+
+        # Reuse an existing endpoint or create one.
+        endpoints = aiplatform.Endpoint.list(
+            filter=f'display_name="{endpoint}"',
+            project=self.cfg.project_id,
+            location=self.cfg.region,
+        )
+
+        if endpoints:
+            ep = endpoints[0]
+            print(f"Using existing endpoint: {ep.resource_name}")
+        else:
+            ep = aiplatform.Endpoint.create(
+                display_name=endpoint,
+                labels=self.cfg.tags(3),
+                project=self.cfg.project_id,
+                location=self.cfg.region,
+                sync=True,
+            )
+            print(f"Created endpoint: {ep.resource_name}")
+
+        ep.deploy(
+            model=model,
+            deployed_model_display_name=f"{endpoint}-model",
+            traffic_percentage=100,
+            machine_type=instance,
+            min_replica_count=1,
+            max_replica_count=1,
+            sync=True,
+        )
+
+        print(f"Deployed model: {model.resource_name}")
+        print(f"Endpoint: {ep.resource_name}")
+
+        return ep.resource_name
+
+    def invoke(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Invoke a Vertex Endpoint using the service's feature-dict payload."""
+        from google.cloud import aiplatform
+        from src.data import FEATURES
+
+        aiplatform.init(
+            project=self.cfg.project_id,
+            location=self.cfg.region,
+        )
+
+        # Accept either an endpoint resource name or a display name.
+        if endpoint.startswith("projects/"):
+            ep = aiplatform.Endpoint(
+                endpoint_name=endpoint,
+                project=self.cfg.project_id,
+                location=self.cfg.region,
+            )
+        else:
+            endpoints = aiplatform.Endpoint.list(
+                filter=f'display_name="{endpoint}"',
+                project=self.cfg.project_id,
+                location=self.cfg.region,
+            )
+            if not endpoints:
+                raise RuntimeError(f"Vertex endpoint not found: {endpoint}")
+            ep = endpoints[0]
+
+        missing = [name for name in FEATURES if name not in payload]
+        if missing:
+            raise ValueError(f"Missing features: {missing}")
+
+        instance = [payload[name] for name in FEATURES]
+        prediction = ep.predict(instances=[instance])
+
+        deployed_version = "unknown"
+        if ep.gca_resource.deployed_models:
+            deployed_model = ep.gca_resource.deployed_models[0]
+            deployed_version = getattr(deployed_model, "model", "unknown").split("/")[-1]
+
+        return {
+            "predictions": prediction.predictions,
+            "model_version": deployed_version,
+            "endpoint": ep.resource_name,
+        }
+
     # emit_metric                       -> Lab 4 (Cloud Monitoring time series)
     # generate                          -> Lab 5 (managed LLM endpoint; read usageMetadata for tokens)
     # teardown                          -> Lab 5 (filter resources by label)
