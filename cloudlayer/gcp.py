@@ -328,6 +328,20 @@ class GcpAdapter(CloudAdapter):
             "endpoint": ep.resource_name,
         }
 
+    def teardown(self, tags: dict[str, str]) -> list[str]:
+        from google.cloud import aiplatform
+        aiplatform.init(project=self.cfg.project_id, location=self.cfg.region)
+        deleted=[]
+        for ep in aiplatform.Endpoint.list(project=self.cfg.project_id, location=self.cfg.region):
+            if ep.display_name != "itcs355-lab3-endpoint":
+                continue
+            for dm in list(ep.gca_resource.deployed_models):
+                ep.undeploy(deployed_model_id=str(dm.id), sync=True)
+                deleted.append(f"deployed-model:{dm.id}")
+            ep.delete(sync=True)
+            deleted.append(f"endpoint:{ep.resource_name}")
+        return deleted
+
     # emit_metric                       -> Lab 4 (Cloud Monitoring time series)
     # generate                          -> Lab 5 (managed LLM endpoint; read usageMetadata for tokens)
     # teardown                          -> Lab 5 (filter resources by label)
